@@ -3,7 +3,7 @@ import numpy as np
 from matplotlib import pyplot as plt
 from pygears import gear, sim, reg
 from pygears.lib import drv, collect
-from pygears.typing import Fixp
+from pygears.typing import Fixp, Uint
 from dataflow_template import psk_quantizer, fir_adaptive, fir_adaptive_top, dfe_adaptive_top 
 from channel import RayleighChannel, AWGNChannel
 
@@ -39,7 +39,7 @@ def fir_direct_testbench():
    
 def fir_adaptive_testbench():
     # generate test sequence
-    raylChan = RayleighChannel(mean_delay=2, max_delay=10, rician_factor=1.0, var_rate=0.00)
+    raylChan = RayleighChannel(mean_delay=1, max_delay=4, rician_factor=10.0, var_rate=0.00)
     awgnChan = AWGNChannel(pwr=0.000)
     xs_tx = []
     xs_rx = []
@@ -64,15 +64,15 @@ def fir_adaptive_testbench():
     drv_dtarget = drv(t=Fixp[wl_int, wl_fixp], seq=xs_tx)
     
     fir_adaptive_top(din=drv_din, dtarget=drv_dtarget, init_coeffs=init_coeffs, 
-                     lr=0.01, quantizer=psk_quantizer) \
+                     lr=0.03, quantizer=psk_quantizer) \
         | collect(result=res)
     sim(resdir='../sim/')
     
-    #for x_tx, x_rx, r in zip(xs_tx, xs_rx, res):
-    #    print(f"{x_tx:.2f}, {x_rx:.2f}, {float(r):.2f}")
-    es = np.abs(np.array(xs_tx) - np.array([float(r) for r in res]))
+    #for x_tx, x_rx, (d, e) in zip(xs_tx, xs_rx, res):
+    #    print(f"{x_tx:.2f}, {x_rx:.2f}, {float(e):.2f}")
+    es = np.abs(np.array([float(e) for d, e in res]))
     #print(np.array(xs_tx))
-    #print(np.array(res))
+    #print(np.array([float(e) for d, e in res]))
     #print(es)
     plt.plot(np.arange(len(es)), es)
     plt.show()
@@ -81,16 +81,19 @@ def fir_adaptive_testbench():
     
 def dfe_adaptive_testbench():
     # generate test sequence
-    raylChan = RayleighChannel(mean_delay=3, max_delay=50, rician_factor=1.0, var_rate=0.00)
+    raylChan = RayleighChannel(mean_delay=1, max_delay=4, rician_factor=10.0, var_rate=0.00)
     awgnChan = AWGNChannel(pwr=0.000)
     xs_tx = []
     xs_rx = []
     
-    for i in range(1000):
+    len_train = 1000
+    len_track = 0
+    for i in range(len_train + len_track):
         x_tx = np.random.randint(2) * 2.0 - 1.0
         x_rx = awgnChan(raylChan(x_tx))
         xs_tx.append(x_tx)
         xs_rx.append(x_rx)
+    ctrls = [0] * len_train + [1] * len_track
     
     # set architecture parameters
     wl_fixp  = 16
@@ -106,6 +109,7 @@ def dfe_adaptive_testbench():
     reg["debug/trace"] = []
     drv_din = drv(t=Fixp[wl_int, wl_fixp], seq=xs_rx)
     drv_dtarget = drv(t=Fixp[wl_int, wl_fixp], seq=xs_tx)
+    #drv_dctrl = drv(t=Uint[1], seq=ctrls)
     
     dfe_adaptive_top(din=drv_din, dtarget=drv_dtarget, \
                      init_ff_coeffs=init_ff_coeffs, init_fb_coeffs=init_fb_coeffs, \
@@ -115,7 +119,7 @@ def dfe_adaptive_testbench():
     
     #for x_tx, x_rx, r in zip(xs_tx, xs_rx, res):
     #    print(f"{x_tx:.2f}, {x_rx:.2f}, {float(r):.2f}")
-    es = np.abs(np.array(xs_tx) - np.array([float(r) for r in res]))
+    es = np.abs(np.array([float(e) for d, e in res]))
     plt.plot(np.arange(len(es)), es)
     plt.show()
     return

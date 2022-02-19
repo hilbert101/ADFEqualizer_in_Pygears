@@ -1,9 +1,9 @@
 import os
 import numpy as np
 from pygears import gear, Intf
-from pygears.lib import dreg, qround, saturate, trunc, decouple, const
+from pygears.lib import dreg, qround, saturate, trunc, decouple, const, fix, mux, ccat, shred
 from pygears.lib import flatten, priority_mux, replicate, once, union_collapse
-from pygears.typing import Fixp, Tuple, Array, ceil_pow2
+from pygears.typing import Uint, Fixp, Tuple, Array, ceil_pow2
 
 
 @gear
@@ -24,16 +24,17 @@ def fir_direct(din, b, *, fract=0):
 def psk_quantizer(din):
     """
         Two level quantizer (modulation: phase-shift keying, PSK)
-    """
-	# don't know why, but it has to be written like this
-    def level_pos():
-        return const(val=din.dtype(1.0))
-    def level_neg():
-        return const(val=din.dtype(-1.0))
-	
-    if din < 0: ret = level_neg()
-    else: ret = level_pos()
-    return ret
+    """  
+    level_pos = const(val=1.0, tout=din.dtype) #fix(din, val=1.0, tout=din.dtype) #
+    level_neg = const(val=-1.0, tout=din.dtype) #fix(din, val=-1.0, tout=din.dtype) #
+    return mux(din < 0, level_pos, level_neg) | union_collapse
+    
+
+#@gear
+#def mux_wrap(ctrl, *din):
+#    for d in din:
+#    	shred(d)
+#    return mux(ctrl, *din)
 	
 	
 @gear
@@ -99,55 +100,54 @@ def fir_adaptive_top(din, dtarget, *, init_coeffs=(1.0,), lr=1.0, quantizer=psk_
         The learning rate (lr) defines the step size of coefficient adaptation.
     """
     # create variable
-    #zero = Fixp[din.dtype.integer, din.dtype.width](0.0)
-    #lr  = Fixp[din.dtype.integer, din.dtype.width](lr)  # dont know why this doesn't work here
-    #lr  = din.dtype(lr) # and this doesn't work either
-    
-    lr   = const(val=din.dtype(lr)) # don't use two const in one func. sim will not start
     lr_e = Intf(din.dtype) # learning rate times error term
     
     # feed forward
-    dout = fir_adaptive(din=din, lr_e=lr_e, init_coeffs=init_coeffs)
-    dquant = quantizer(din=dout)
-    if dtarget != 0: # zero: 
-        err = (dtarget - dout) | saturate(t=din.dtype) # training
-    else:     
-        err = (dquant - dout) | saturate(t=din.dtype) # blind tracking
+    pred = fir_adaptive(din=din, lr_e=lr_e, init_coeffs=init_coeffs)
+    dout = quantizer(din=pred)
+    err = (dtarget - pred) | saturate(t=din.dtype) # training
     
-    lr_e_tmp = lr * err | qround(fract=din.dtype.fract) | saturate(t=din.dtype)
-    lr_e |= lr_e_tmp  # connect back
+    lr_e_next = (err * fix(err, val=lr, tout=din.dtype)) \
+        | qround(fract=din.dtype.fract) | saturate(t=din.dtype)
+        
+    lr_e |= lr_e_next  # connect back
 	
-    return dout
+    return ccat(dout, err)
     
     
 @gear
-def dfe_adaptive_top(din: Fixp, dtarget, *, init_ff_coeffs=(1.0,), init_fb_coeffs=(0.0,),
+def dfe_adaptive_top(din, dtarget, *, init_ff_coeffs=(1.0,), init_fb_coeffs=(0.0,),
                                       lr=1.0, quantizer=psk_quantizer):
     # create variable
-    lr   = const(val=din.dtype(lr)) 
-    comb = Intf(din.dtype) # combined result of feed forward and feedback
-    
-    # quantization and error
-    dout = comb #quantizer(din=comb)
-    if dtarget != 0:
-        err = (dtarget - comb) | saturate(t=din.dtype)  # training
-    else:     
-        err = (dout - comb) | saturate(t=din.dtype)  # blind tracking
-    
-    lr_e = (lr * err) | qround(fract=din.dtype.fract) | saturate(t=din.dtype)
-    
-    # decouple
+    lr_e = Intf(din.dtype)
+    dout = Intf(din.dtype)
     fb_delay = 1
+    
+    # feedback decouple
     dout_prev = dout \
         | decouple(depth=ceil_pow2(fb_delay)) \
         | prefill(val=0.0, num=fb_delay, dtype=din.dtype)
     
     # feed forward and feedback
-    ff   = fir_adaptive(din=din, lr_e=lr_e, init_coeffs=init_ff_coeffs)  # feed forward part
-    fb   = fir_adaptive(din=dout_prev, lr_e=lr_e, init_coeffs=init_fb_coeffs)  # feedack part
-    comb |= (ff + fb) | saturate(t=din.dtype) # connect back
+    ff   = fir_adaptive(din, lr_e=lr_e, init_coeffs=init_ff_coeffs)  # feed forward part
+    fb   = fir_adaptive(dout_prev, lr_e=lr_e, init_coeffs=init_fb_coeffs)  # feedack part
+    comb = (ff + fb) | saturate(t=din.dtype)
     
-    return dout
+    # quantization and error 
+    dout_next = comb | quantizer  # connect back
+    
+    # ctrl = dtarget != fix(dtarget, val=0.0, tout=din.dtype) # dont know why not work
+    
+    #dans = mux(dctrl, dtarget, dout_next) | union_collapse
+    #shred(dtarget)
+    
+    err  = (dtarget - comb) \
+        | saturate(t=din.dtype)
+    lr_e |= (err * fix(err, val=lr, tout=din.dtype)) \
+        | qround(fract=din.dtype.fract) | saturate(t=din.dtype) # connect back
+    dout |= dout_next
+    
+    return ccat(dout, err)
     
 
 if __name__ == '__main__':
