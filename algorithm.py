@@ -4,7 +4,16 @@ from channel import RayleighChannel, AWGNChannel
 
 
 class AdaptiveDecisionFeedbackEqualizer:
+    """
+        Algorithm implementation of adaptive DFE.
+    """
     def __init__(self, fftap=12, fbtap=8, lr=0.001, qfunc=lambda x: np.sign(x)):
+        """
+            fftap: tap number of the feed forward part
+            fbtap: tap number of the feedback part
+            lr: learning rate (step size)
+            qfunc: quantization function. default is a two level quantization
+        """
         self.fb_coeffs = np.zeros(fbtap)
         self.ff_coeffs = np.zeros(fftap)
         self.ff_coeffs[0] = 1.0
@@ -14,7 +23,7 @@ class AdaptiveDecisionFeedbackEqualizer:
         self.qfunc = qfunc
         return
 
-    def __call__(self, x, d_target=None):
+    def __call__(self, x, d_target=0):
         self.ff_mems = np.roll(self.ff_mems, 1)
         self.ff_mems[0] = x
         y = np.sum(self.ff_coeffs * self.ff_mems)
@@ -23,7 +32,7 @@ class AdaptiveDecisionFeedbackEqualizer:
             z = np.sum(self.fb_coeffs * self.fb_mems)
         v = y + z
         d = d_out = self.qfunc(v)  # blind tracking
-        if d_target is not None: d = d_target  # training
+        if d_target: d = d_target  # training
         e = d - v
         self.ff_coeffs += self.lr * e * self.ff_mems
         self.fb_coeffs += self.lr * e * self.fb_mems
@@ -39,10 +48,11 @@ def test_adfe():
     awgnChan = AWGNChannel(pwr=0.001)
     qfunc = lambda x: np.sign(x)  # PSK quantization, 2 quantization level
     adfe = AdaptiveDecisionFeedbackEqualizer(fftap=12, fbtap=8, lr=0.03, qfunc=qfunc)
-    ts = []
-    es = []
-
-    for i in range(3000):
+    ts = [] # time step
+    es = [] # error
+    
+    iters = 3000 # number of iterations
+    for i in range(iters):
         x_tx = np.random.randint(2) * 2 - 1
         x_rx = awgnChan(raylChan(x_tx))
         d_rx, e = adfe(x_rx, d_target=x_tx)
@@ -60,3 +70,4 @@ def test_adfe():
 
 if __name__ == '__main__':
     test_adfe()
+    

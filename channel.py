@@ -18,6 +18,9 @@ class AWGNChannel(Channel):
     Additive Gaussian white noise
     """
     def __init__(self, pwr=1.0):
+        """
+            pwr: average power of Gaussian white noise
+        """
         super().__init__()
         self.stddev = np.sqrt(pwr)
         return
@@ -36,6 +39,13 @@ class RayleighChannel(Channel):
         http://www.idc-online.com/technical_references/pdfs/electrical_engineering/Power_Delay_Profile.pdf
     """
     def __init__(self, mean_delay=50, max_delay=100, rician_factor=1.0, var_rate=0.0):
+        """
+            mean_delay: mean delay in power delay profile. larger means more ISI
+            max_delay: max delay in power delay profile. larger means more ISI
+            rician_factor: ratio of directly transmited and scattered signal in power.
+                           0.0 < rician_factor < infinity. larger means cleaner rx signal.
+            var_rate: variation rate of the channel's response. 
+        """
         super().__init__()
         # gain is set to ~1
         self.size = max_delay + 1
@@ -98,3 +108,4 @@ def test_channel_response():
 
 if __name__ == '__main__':
     test_channel_response()
+    
