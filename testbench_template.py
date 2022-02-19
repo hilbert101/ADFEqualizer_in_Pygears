@@ -86,14 +86,13 @@ def dfe_adaptive_testbench():
     xs_tx = []
     xs_rx = []
     
-    len_train = 1000
-    len_track = 0
+    len_train = 500  # number of data for training
+    len_track = 500  # number of data for blind tracking
     for i in range(len_train + len_track):
         x_tx = np.random.randint(2) * 2.0 - 1.0
         x_rx = awgnChan(raylChan(x_tx))
         xs_tx.append(x_tx)
         xs_rx.append(x_rx)
-    ctrls = [0] * len_train + [1] * len_track
     
     # set architecture parameters
     wl_fixp  = 16
@@ -108,8 +107,7 @@ def dfe_adaptive_testbench():
     res = []
     reg["debug/trace"] = []
     drv_din = drv(t=Fixp[wl_int, wl_fixp], seq=xs_rx)
-    drv_dtarget = drv(t=Fixp[wl_int, wl_fixp], seq=xs_tx)
-    #drv_dctrl = drv(t=Uint[1], seq=ctrls)
+    drv_dtarget = drv(t=Fixp[wl_int, wl_fixp], seq=xs_tx[:len_train] + [0]*len_track)
     
     dfe_adaptive_top(din=drv_din, dtarget=drv_dtarget, \
                      init_ff_coeffs=init_ff_coeffs, init_fb_coeffs=init_fb_coeffs, \

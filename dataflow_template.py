@@ -1,8 +1,9 @@
 import os
 import numpy as np
 from pygears import gear, Intf
-from pygears.lib import dreg, qround, saturate, trunc, decouple, const, fix, mux, ccat, shred
+from pygears.lib import dreg, qround, saturate, trunc, decouple
 from pygears.lib import flatten, priority_mux, replicate, once, union_collapse
+from pygears.lib import const, fix, mux, ccat, when
 from pygears.typing import Uint, Fixp, Tuple, Array, ceil_pow2
 
 
@@ -12,11 +13,11 @@ def fir_direct(din, b, *, fract=0):
         Direct DIR filter. Its order is determined by the length of b. 
         Adapted from PyGears' tutorial slides.
     """
-    tap = din
+    temp = din
     add_s = temp * b[0]
     for coef in b[1:]:
-        tap = tap | dreg(init=0)
-        add_s = add_s + (tap * coef)
+        temp = temp | dreg(init=0)
+        add_s = add_s + (temp * coef)
     return add_s | qround(fract=fract) | saturate(t=din.dtype)
     
 
@@ -28,13 +29,6 @@ def psk_quantizer(din):
     level_pos = const(val=1.0, tout=din.dtype) #fix(din, val=1.0, tout=din.dtype) #
     level_neg = const(val=-1.0, tout=din.dtype) #fix(din, val=-1.0, tout=din.dtype) #
     return mux(din < 0, level_pos, level_neg) | union_collapse
-    
-
-#@gear
-#def mux_wrap(ctrl, *din):
-#    for d in din:
-#    	shred(d)
-#    return mux(ctrl, *din)
 	
 	
 @gear
@@ -82,13 +76,13 @@ def fir_adaptive(din, lr_e, *, init_coeffs=(1.0,)):
     if tap_num == 0: 
         return din.dtype(0)
 
-    tap   = din
-    coeff = adaptive_coeff(tap, lr_e, init=init_coeffs[0])
-    add_s = tap * coeff
+    temp  = din
+    coeff = adaptive_coeff(temp, lr_e, init=init_coeffs[0])
+    add_s = temp * coeff
     for i in range(1, tap_num):
-        tap   = tap | dreg(init=0)
-        coeff = adaptive_coeff(tap, lr_e, init=init_coeffs[i])
-        add_s = add_s + (tap * coeff)
+        temp  = temp | dreg(init=0)
+        coeff = adaptive_coeff(temp, lr_e, init=init_coeffs[i])
+        add_s = add_s + (temp * coeff)
     return add_s | qround(fract=din.dtype.fract) | saturate(t=din.dtype)
 
 
@@ -134,18 +128,14 @@ def dfe_adaptive_top(din, dtarget, *, init_ff_coeffs=(1.0,), init_fb_coeffs=(0.0
     comb = (ff + fb) | saturate(t=din.dtype)
     
     # quantization and error 
-    dout_next = comb | quantizer  # connect back
+    dout |= (comb | quantizer)  # connect back
+    ctrl = (dtarget == const(val=0.0, tout=din.dtype)) # control for training/tracking
+    dsel = mux(ctrl, dtarget | when(cond=~ctrl), dout | when(cond=ctrl)) \
+        | union_collapse  # mux2 has to be written like this
     
-    # ctrl = dtarget != fix(dtarget, val=0.0, tout=din.dtype) # dont know why not work
-    
-    #dans = mux(dctrl, dtarget, dout_next) | union_collapse
-    #shred(dtarget)
-    
-    err  = (dtarget - comb) \
-        | saturate(t=din.dtype)
-    lr_e |= (err * fix(err, val=lr, tout=din.dtype)) \
+    err  = (dsel - comb) | saturate(t=din.dtype)  # error term of training/tracking
+    lr_e |= (err * const(val=lr, tout=din.dtype)) \
         | qround(fract=din.dtype.fract) | saturate(t=din.dtype) # connect back
-    dout |= dout_next
     
     return ccat(dout, err)
     
