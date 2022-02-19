@@ -4,7 +4,7 @@ from matplotlib import pyplot as plt
 from pygears import gear, sim, reg
 from pygears.lib import drv, collect
 from pygears.typing import Fixp
-from dataflow_template import fir_adaptive, fir_adaptive_top, psk_quantizer
+from dataflow_template import psk_quantizer, fir_adaptive, fir_adaptive_top, dfe_adaptive_top 
 from channel import RayleighChannel, AWGNChannel
 
 
@@ -77,11 +77,53 @@ def fir_adaptive_testbench():
     plt.plot(np.arange(len(es)), es)
     plt.show()
     return
+    
+    
+def dfe_adaptive_testbench():
+    # generate test sequence
+    raylChan = RayleighChannel(mean_delay=3, max_delay=50, rician_factor=1.0, var_rate=0.00)
+    awgnChan = AWGNChannel(pwr=0.000)
+    xs_tx = []
+    xs_rx = []
+    
+    for i in range(1000):
+        x_tx = np.random.randint(2) * 2.0 - 1.0
+        x_rx = awgnChan(raylChan(x_tx))
+        xs_tx.append(x_tx)
+        xs_rx.append(x_rx)
+    
+    # set architecture parameters
+    wl_fixp  = 16
+    wl_int   = 3
+    wl_fract = wl_fixp - wl_int
+    fftap    = 12
+    fbtap    = 8
+    init_ff_coeffs = tuple([1.0] + [0.0] * (fftap-1))
+    init_fb_coeffs = tuple([0.0] * (fbtap))
+    
+    # setup simulation
+    res = []
+    reg["debug/trace"] = []
+    drv_din = drv(t=Fixp[wl_int, wl_fixp], seq=xs_rx)
+    drv_dtarget = drv(t=Fixp[wl_int, wl_fixp], seq=xs_tx)
+    
+    dfe_adaptive_top(din=drv_din, dtarget=drv_dtarget, \
+                     init_ff_coeffs=init_ff_coeffs, init_fb_coeffs=init_fb_coeffs, \
+                     lr=0.03, quantizer=psk_quantizer) \
+        | collect(result=res)
+    sim(resdir='../sim/')
+    
+    #for x_tx, x_rx, r in zip(xs_tx, xs_rx, res):
+    #    print(f"{x_tx:.2f}, {x_rx:.2f}, {float(r):.2f}")
+    es = np.abs(np.array(xs_tx) - np.array([float(r) for r in res]))
+    plt.plot(np.arange(len(es)), es)
+    plt.show()
+    return
 
 
 if __name__ == '__main__':
     # os.chdir(os.path.dirname(os.path.abspath(__file__)))
     # print(os.getcwd())
     # fir_direct_testbench()
-    fir_adaptive_testbench()
+    dfe_adaptive_testbench()
     

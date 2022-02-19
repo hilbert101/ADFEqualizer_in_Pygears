@@ -26,8 +26,14 @@ def psk_quantizer(din):
         Two level quantizer (modulation: phase-shift keying, PSK)
     """
 	# don't know why, but it has to be written like this
-    if din < 0: Fixp[din.dtype.integer, din.dtype.width](1)  
-    else:       Fixp[din.dtype.integer, din.dtype.width](-1)
+    def level_pos():
+        return const(val=din.dtype(1.0))
+    def level_neg():
+        return const(val=din.dtype(-1.0))
+	
+    if din < 0: ret = level_neg()
+    else: ret = level_pos()
+    return ret
 	
 	
 @gear
@@ -111,6 +117,36 @@ def fir_adaptive_top(din, dtarget, *, init_coeffs=(1.0,), lr=1.0, quantizer=psk_
     lr_e_tmp = lr * err | qround(fract=din.dtype.fract) | saturate(t=din.dtype)
     lr_e |= lr_e_tmp  # connect back
 	
+    return dout
+    
+    
+@gear
+def dfe_adaptive_top(din: Fixp, dtarget, *, init_ff_coeffs=(1.0,), init_fb_coeffs=(0.0,),
+                                      lr=1.0, quantizer=psk_quantizer):
+    # create variable
+    lr   = const(val=din.dtype(lr)) 
+    comb = Intf(din.dtype) # combined result of feed forward and feedback
+    
+    # quantization and error
+    dout = comb #quantizer(din=comb)
+    if dtarget != 0:
+        err = (dtarget - comb) | saturate(t=din.dtype)  # training
+    else:     
+        err = (dout - comb) | saturate(t=din.dtype)  # blind tracking
+    
+    lr_e = (lr * err) | qround(fract=din.dtype.fract) | saturate(t=din.dtype)
+    
+    # decouple
+    fb_delay = 1
+    dout_prev = dout \
+        | decouple(depth=ceil_pow2(fb_delay)) \
+        | prefill(val=0.0, num=fb_delay, dtype=din.dtype)
+    
+    # feed forward and feedback
+    ff   = fir_adaptive(din=din, lr_e=lr_e, init_coeffs=init_ff_coeffs)  # feed forward part
+    fb   = fir_adaptive(din=dout_prev, lr_e=lr_e, init_coeffs=init_fb_coeffs)  # feedack part
+    comb |= (ff + fb) | saturate(t=din.dtype) # connect back
+    
     return dout
     
 
