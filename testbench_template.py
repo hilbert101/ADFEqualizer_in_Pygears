@@ -1,5 +1,6 @@
 import os
 import numpy as np
+from matplotlib import pyplot as plt
 from pygears import gear, sim, reg
 from pygears.lib import drv, collect
 from pygears.typing import Fixp
@@ -38,7 +39,7 @@ def fir_direct_testbench():
    
 def fir_adaptive_testbench():
     # generate test sequence
-    raylChan = RayleighChannel(mean_delay=1, max_delay=4, rician_factor=1.0, var_rate=0.00)
+    raylChan = RayleighChannel(mean_delay=2, max_delay=10, rician_factor=1.0, var_rate=0.00)
     awgnChan = AWGNChannel(pwr=0.000)
     xs_tx = []
     xs_rx = []
@@ -53,22 +54,28 @@ def fir_adaptive_testbench():
     wl_fixp  = 16
     wl_int   = 3
     wl_fract = wl_fixp - wl_int
-    num_tap  = 4
+    num_tap  = 8
     init_coeffs = tuple([1.0] + [0.0] * (num_tap-1))
     
     # setup simulation
     res = []
-    reg["debug/trace"] = ['*']
+    reg["debug/trace"] = [] # ['*'] # use ['*'] for debug (but sim takes longer)
     drv_din = drv(t=Fixp[wl_int, wl_fixp], seq=xs_rx)
     drv_dtarget = drv(t=Fixp[wl_int, wl_fixp], seq=xs_tx)
     
     fir_adaptive_top(din=drv_din, dtarget=drv_dtarget, init_coeffs=init_coeffs, 
                      lr=0.01, quantizer=psk_quantizer) \
-    	| collect(result=res)
+        | collect(result=res)
     sim(resdir='../sim/')
     
-    for x_tx, x_rx, r in zip(xs_tx, xs_rx, res):
-    	print(f"{x_tx:.2f}, {x_rx:.2f}, {float(r):.2f}")
+    #for x_tx, x_rx, r in zip(xs_tx, xs_rx, res):
+    #    print(f"{x_tx:.2f}, {x_rx:.2f}, {float(r):.2f}")
+    es = np.abs(np.array(xs_tx) - np.array([float(r) for r in res]))
+    #print(np.array(xs_tx))
+    #print(np.array(res))
+    #print(es)
+    plt.plot(np.arange(len(es)), es)
+    plt.show()
     return
 
 
