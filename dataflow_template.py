@@ -22,13 +22,24 @@ def fir_direct(din, b, *, fract=0):
     
 
 @gear
+async def mux_comb(ctrl: Uint, dins: Tuple) -> b'dins[0]':
+    """
+        Combinational MUX_N. Assume all input in dins are of the same type
+    """
+    async with ctrl as c:
+        async with dins as ds:
+            yield ds[int(c)]
+
+
+@gear
 def psk_quantizer(din):
     """
         Two level quantizer (modulation: phase-shift keying, PSK)
     """  
     level_pos = const(val=1.0, tout=din.dtype) #fix(din, val=1.0, tout=din.dtype) #
     level_neg = const(val=-1.0, tout=din.dtype) #fix(din, val=-1.0, tout=din.dtype) #
-    return mux(din < 0, level_pos, level_neg) | union_collapse
+    #return mux(din < 0, level_pos, level_neg) | union_collapse
+    return mux_comb(din < 0, ccat(level_pos, level_neg))
 	
 	
 @gear
@@ -130,8 +141,9 @@ def dfe_adaptive_top(din, dtarget, *, init_ff_coeffs=(1.0,), init_fb_coeffs=(0.0
     # quantization and error 
     dout |= (comb | quantizer)  # connect back
     ctrl = (dtarget == const(val=0.0, tout=din.dtype)) # control for training/tracking
-    dsel = mux(ctrl, dtarget | when(cond=~ctrl), dout | when(cond=ctrl)) \
-        | union_collapse  # mux2 has to be written like this
+    #dsel = mux(ctrl, dtarget | when(cond=~ctrl), dout | when(cond=ctrl)) \
+    #    | union_collapse  # mux2 realization with existing gears
+    dsel = mux_comb(ctrl, ccat(dtarget, dout))  # self-made gears
     
     err  = (dsel - comb) | saturate(t=din.dtype)  # error term of training/tracking
     lr_e |= (err * const(val=lr, tout=din.dtype)) \
