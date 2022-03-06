@@ -5,6 +5,7 @@ from pygears.lib import dreg, qround, saturate, trunc, decouple
 from pygears.lib import flatten, priority_mux, replicate, once, union_collapse
 from pygears.lib import const, fix, mux, ccat, when
 from pygears.typing import Uint, Fixp, Tuple, Array, ceil_pow2
+from adfe_util import qam16_quantizer
 
 
 @gear
@@ -89,16 +90,19 @@ def fir_adaptive(din, lr_e, *, init_coeffs=(1.0,)):
 
     temp  = din
     coeff = adaptive_coeff(temp, lr_e, init=init_coeffs[0])
-    add_s = temp * coeff
+    add_s = (temp * coeff) | qround(fract=din.dtype.fract) | saturate(t=din.dtype)
     for i in range(1, tap_num):
         temp  = temp | dreg(init=0)
         coeff = adaptive_coeff(temp, lr_e, init=init_coeffs[i])
-        add_s = add_s + (temp * coeff)
-    return add_s | qround(fract=din.dtype.fract) | saturate(t=din.dtype)
+        for j in range(i):
+            coeff = coeff | dreg(init=0)
+        add_s = (add_s + (temp * coeff)) \
+            | qround(fract=din.dtype.fract) | saturate(t=din.dtype)
+    return add_s
 
 
 @gear
-def fir_adaptive_top(din, dtarget, *, init_coeffs=(1.0,), lr=1.0, quantizer=psk_quantizer):
+def fir_adaptive_top(din, dtarget, *, init_coeffs=(1.0,), lr=1.0, quantizer=qam16_quantizer):
     """
         Top module of adaptive FIR.
         The tap number is determined by the length of init_coeffs
@@ -122,7 +126,7 @@ def fir_adaptive_top(din, dtarget, *, init_coeffs=(1.0,), lr=1.0, quantizer=psk_
     
 @gear
 def dfe_adaptive_top(din, dtarget, *, init_ff_coeffs=(1.0,), init_fb_coeffs=(0.0,),
-                                      lr=1.0, quantizer=psk_quantizer):
+                                      lr=1.0, quantizer=qam16_quantizer):
     # create variable
     lr_e = Intf(din.dtype)
     dout = Intf(din.dtype)
@@ -139,7 +143,7 @@ def dfe_adaptive_top(din, dtarget, *, init_ff_coeffs=(1.0,), init_fb_coeffs=(0.0
     comb = (ff + fb) | saturate(t=din.dtype)
     
     # quantization and error 
-    dout |= (comb | quantizer)  # connect back
+    dout |= (comb | quantizer)[0]  # connect back
     ctrl = (dtarget == const(val=0.0, tout=din.dtype)) # control for training/tracking
     #dsel = mux(ctrl, dtarget | when(cond=~ctrl), dout | when(cond=ctrl)) \
     #    | union_collapse  # mux2 realization with existing gears

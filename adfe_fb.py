@@ -1,90 +1,14 @@
 import os
 import numpy as np
 from pygears import gear, Intf, sim, reg
-from pygears.lib import dreg, decouple, const, ccat
+from pygears.lib import dreg, decouple, const, ccat, qround, saturate
 from pygears.lib import flatten, priority_mux, replicate, once, union_collapse
 from pygears.lib import drv, collect
-from pygears.typing import Int, Uint, Fixp, Tuple, Array, ceil_pow2, saturate
+from pygears.typing import Int, Uint, Fixp, Tuple, Array, ceil_pow2
 from pygears.hdl import hdlgen
-
-
-@gear
-def decouple_reg(din, *, init=0, num=1):
-    """
-        Required in all feedback loop. Adapted from PyGears' website
-    """
-    fill = once(val=din.dtype(init)) \
-        | replicate(num) \
-        | flatten
-
-    return priority_mux(fill, din | decouple(depth=ceil_pow2(num))) \
-        | union_collapse
+from adfe_util import decouple_reg, mux_comb, ctrl_add2, ctrl_add3, ctrl2_add3, qam16_quantizer
         
-        
-@gear
-async def psk_quantizer(din: Fixp) -> Tuple[Int[2], Uint[1]]:
-    async with din as d:
-        if d >= 0:
-            yield Tuple[Int[2], Uint[1]]((Int[2](1), Uint[1](0)))
-        else:
-            yield Tuple[Int[2], Uint[1]]((Int[2](-1), Uint[1](1)))
-            
-            
-@gear
-async def qam16_quantizer(din: Fixp) -> Tuple[Int[3], Uint[1], Uint[1]]:
-    dtype = Tuple[Int[3], Uint[1], Uint[1]] # quant point, sign, index
-    async with din as d:
-        if d >= 2:
-            yield dtype((Int[3](3), Uint[1](0), Uint[1](1)))
-        elif d >= 0:
-            yield dtype((Int[3](1), Uint[1](0), Uint[1](0)))
-        elif d >= -2:
-            yield dtype((Int[3](-1), Uint[1](1), Uint[1](0)))
-        else:
-            yield dtype((Int[3](-3), Uint[1](1), Uint[1](1)))
-
-
-@gear
-async def ctrl_add2(ctrl: Uint[1], din0: Fixp, din1: Fixp) -> b'din0':
-    async with ctrl as c:
-        async with din0 as d0:
-            async with din1 as d1:
-                if c == 0:
-                    yield saturate(d0 + d1, t=din0.dtype)
-                else:
-                    yield saturate(d0 - d1, t=din0.dtype)
-                    
-
-@gear
-async def ctrl_add3(ctrl: Uint[1], din0: Fixp, din1: Fixp, din2: Fixp) -> b'din0':
-    async with ctrl as c:
-        async with din0 as d0:
-            async with din1 as d1:
-                async with din2 as d2:
-                    if c == 0:
-                        yield saturate(d0 + d1 + d2, t=din0.dtype)
-                    else:
-                        yield saturate(d0 + d1 - d2, t=din0.dtype)
-
-
-@gear
-async def ctrl2_add3(ctrl1: Uint[1], ctrl2: Uint[1], 
-                     din0: Fixp, din1: Fixp, din2: Fixp) -> b'din0':
-    async with ctrl1 as c1:
-        async with ctrl2 as c2:
-            async with din0 as d0:
-                async with din1 as d1:
-                    async with din2 as d2:
-                        if c1 == 0 and c2 == 0:
-                            yield saturate(d0 + d1 + d2, t=din0.dtype)
-                        elif c1 == 0 and c2 == 1:
-                            yield saturate(d0 + d1 - d2, t=din0.dtype)
-                        elif c1 == 1 and c2 == 0:
-                            yield saturate(d0 - d1 + d2, t=din0.dtype)
-                        else:
-                            yield saturate(d0 - d1 - d2, t=din0.dtype)
-         
-
+       
 @gear
 def adfe_fb_inner(din, b):
     comb_next = Intf(din.dtype)
@@ -110,28 +34,31 @@ def adfe_fb_inner(din, b):
     """
     
     
-    
+ 
 @gear
 def adfe_fb_stag(din, b):
-    comb_next = Intf(din.dtype)
-    comb_prev = decouple_reg(comb_next, init=0, num=1)
-    qaunt = qam16_quantizer(comb_prev)
-    dout, sgn, idx = qaunt[0], qaunt[1], qaunt[2]
+    dpred = Intf(din.dtype)
+    dqaunt, sgn, idx = qam16_quantizer(dpred)
     
     # for the first stage, result combined with the input
-    temp = Intf(din.dtype)
-    comb_next |= ctrl_add3(sgn, temp, din, b[0][idx])
+    temp  = Intf(din.dtype)
+    coeff = mux_comb(idx, b[0])
+    dpred |= ctrl_add3(sgn, temp, din, coeff) \
+        | decouple_reg(init=0, num=1)
     
     stack = [] # iterate thru all the rest coeffecients
-    for coeff in b[1:]:
+    for lut in b[1:]:
         if len(stack) == 0:
-            stack.append(coeff) # do nothing
+            stack.append(lut) # do nothing
         else:
             # define current stage
             sgn_prev  = sgn | dreg(init=0)
             idx_prev  = idx | dreg(init=0)
             temp_prev = Intf(din.dtype)
-            temp |= ctrl2_add3(sgn_prev, sgn, temp_prev, coeff[idx_prev], stack.pop()[idx])
+            coeff_prev = mux_comb(idx_prev, lut)
+            coeff      = mux_comb(idx, stack.pop())
+            
+            temp |= ctrl2_add3(sgn_prev, sgn, temp_prev, coeff_prev, coeff)
             
             # pass to following stage
             sgn, idx, temp = sgn_prev, idx_prev, temp_prev
@@ -140,16 +67,43 @@ def adfe_fb_stag(din, b):
     if len(stack) == 0:
         temp |= const(val=0.0, tout=din.dtype)
     else:
-        temp |= ctrl_add2(sgn, const(val=0.0, tout=din.dtype), stack.pop()[idx])
+        coeff = mux_comb(idx, stack.pop())
+        temp |= ctrl_add2(sgn, const(val=0.0, tout=din.dtype), coeff)
     
-    return ccat(dout, comb_prev)
+    return ccat(dqaunt, dpred)
     
-    """
-        maximum synthesizable rate: 
-            16-bit: 
-            8-tap: CK = 1.18 ns
-    """
     
+        #maximum synthesizable rate: 
+        #    16-bit: 
+        #    8-tap: CK = 1.18 ns
+    
+
+
+
+@gear
+def adfe_fb_stag_v1(din, b):
+    temp_prev = Intf(din.dtype)
+    temp = din 
+    add_s = temp * b[0] + temp_prev #first tap
+    #print(add_s)
+    for i, coef in enumerate(b[1:]):
+        add_prev2 = Intf(din.dtype)
+        if i%2 == 0:
+            add_prev = (temp * coef + add_prev2) \
+                | qround(fract=din.dtype.fract) \
+                | saturate(t=din.dtype)
+            temp_prev |= dreg(add_prev)
+            temp_prev = add_prev2 
+        else:
+            temp = dreg(temp)
+            temp_prev |= (temp * coef + add_prev2) \
+                | qround(fract=din.dtype.fract) | saturate(t=din.dtype) 
+            temp_prev = add_prev2
+    temp_prev |= const(val=0.0, tout=din.dtype)
+    #print(temp_prev)
+    return add_s | qround(fract=din.dtype.fract) | saturate(t=din.dtype)
+
+   
 @gear
 def adfe_fb_wrap(din, b):
     dout = adfe_fb_inner(din | dreg(init=0), b | dreg(init=0)) | dreg(init=0)
