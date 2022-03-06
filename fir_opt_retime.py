@@ -11,14 +11,15 @@ def fir_opt_retime(din, b): # -> b'din':
     #print(add_s)
     for i, coef in enumerate(b[1:]):
         add_prev2 = Intf(din.dtype)
-        mult_delay = (temp * coef) | dreg(init = 0)
         if i%2 == 0:
+            mult_delay = (temp * coef) | dreg(init = 0)
             add_prev = (mult_delay + add_prev2) \
                 | qround(fract=din.dtype.fract) \
                 | saturate(t=din.dtype)
             temp_prev |= dreg(add_prev)
             temp_prev = add_prev2 
         else:
+            mult_delay = (temp * coef) | dreg(init = 0)
             temp = dreg(temp)
             temp_prev |= (mult_delay + add_prev2) \
                 | qround(fract=din.dtype.fract) |saturate(t=din.dtype) 
