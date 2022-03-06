@@ -3,6 +3,7 @@ from pygears.typing import Uint, Fixp, Tuple
 from pygears.lib import dreg, qround, saturate, decouple, pipeline, const
 from pygears import gear, Intf
 
+"""
 @gear
 def fir_opt_retime(din, b): # -> b'din':
     temp_prev = Intf(din.dtype)
@@ -27,6 +28,36 @@ def fir_opt_retime(din, b): # -> b'din':
     temp_prev |= const(val=0.0, tout=din.dtype)
     #print(temp_prev)
     return add_s | qround(fract=din.dtype.fract) | saturate(t=din.dtype)
+"""
+
+
+@gear
+def fir_opt_retime(din, b):
+    add_prev = Intf(din.dtype)
+    temp = din 
+    mult_delay = (temp * b[0]) | dreg(init = 0)  # also need dreg here
+    dout = mult_delay + add_prev \
+        | qround(fract=din.dtype.fract) \
+        | saturate(t=din.dtype)
+
+    for i, coef in enumerate(b[1:]):
+        add = Intf(din.dtype)
+        if i%2 == 0:
+            mult_delay = (temp * coef) | dreg(init = 0)  # dreg must be written like this
+                                                         # dreg(din) has weird bug
+            add_prev |= (mult_delay + add) \
+                | qround(fract=din.dtype.fract) \
+                | saturate(t=din.dtype) \
+                | dreg(init = 0)
+        else:
+            temp = temp | dreg(init = 0)
+            mult_delay = (temp * coef) | dreg(init = 0)
+            add_prev |= (mult_delay + add) \
+                | qround(fract=din.dtype.fract) | saturate(t=din.dtype) 
+        add_prev = add 
+    add_prev |= const(val=0.0, tout=din.dtype)
+    #print(temp_prev)
+    return dout 
 
 
 def dut_hdlgen():

@@ -100,7 +100,7 @@ def dfe_adaptive_testbench():
     wl_int   = 5
     wl_fract = wl_fixp - wl_int
     fftap    = 12
-    fbtap    = 1
+    fbtap    = 8
     init_ff_coeffs = tuple([1.0] + [0.0] * (fftap-1))
     init_fb_coeffs = tuple([0.0] * (fbtap))
     
@@ -128,6 +128,6 @@ if __name__ == '__main__':
     # os.chdir(os.path.dirname(os.path.abspath(__file__)))
     # print(os.getcwd())
     # fir_direct_testbench()
-    fir_adaptive_testbench()
-    # dfe_adaptive_testbench()
+    # fir_adaptive_testbench()
+    dfe_adaptive_testbench()
     

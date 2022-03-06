@@ -5,47 +5,20 @@ from pygears import gear, Intf, sim, reg
 from pygears.lib import dreg, decouple, const, ccat, qround, saturate
 from pygears.lib import flatten, priority_mux, replicate, once, union_collapse
 from pygears.lib import drv, collect
-from pygears.typing import Int, Uint, Fixp, Tuple, Array, ceil_pow2, trunc, code
+from pygears.typing import Int, Uint, Fixp, Tuple, Array, ceil_pow2
 from pygears.hdl import hdlgen
-from adfe_util import qam16_quantizer, decouple_reg, mux_comb
+from fir_opt_retime import fir_opt_retime
 from adfe_fb import adfe_fb_stag, adfe_fb_stag_v1
-from adfe_mse import adfe_ff_adapt_coeffs, adfe_fb_adapt_luts
+from adfe_lms import adfe_ff_adapt_coeffs, adfe_fb_adapt_luts
+from adfe_util import qam16_quantizer, decouple_reg, mux_comb
 from testbench_template import fir_adaptive_testbench
 from channel import RayleighChannel, AWGNChannel
 
 
 @gear
-def fir_opt_retime(din, b):
-    temp_prev = Intf(din.dtype)
-    temp = din 
-    add_s = temp * b[0] + temp_prev #first tap
-    #print(add_s)
-    i = 0
-    for coef in b[1:]:
-        add_prev2 = Intf(din.dtype)
-        if i%2 == 0:
-            mult_delay = (temp * coef) | dreg(init = 0)
-            add_prev = (mult_delay + add_prev2) \
-                | qround(fract=din.dtype.fract) \
-                | saturate(t=din.dtype)
-            temp_prev |= dreg(add_prev)
-            temp_prev = add_prev2 
-        else:
-            temp = dreg(temp)
-            mult_delay = (temp * coef) | dreg(init = 0)
-            temp_prev |= (mult_delay + add_prev2) \
-                | qround(fract=din.dtype.fract) | saturate(t=din.dtype) 
-            temp_prev = add_prev2
-        i += 1
-    temp_prev |= const(val=0.0, tout=din.dtype)
-    #print(temp_prev)
-    return add_s | qround(fract=din.dtype.fract) | saturate(t=din.dtype)
-
-
-@gear
 def fir_opt_retime_adapt(din, dtarget, *, init_coeffs=(1.0, ), lr=0.01):
     din = din | dreg(init=0)
-    dtarget = dtarget | dreg(init=0) | dreg(init=0)
+    dtarget = dtarget | dreg(init=0) | dreg(init=0) | dreg(init=0)
     dpred = Intf(din.dtype)
     
     dquant = qam16_quantizer(dpred)[0]
@@ -57,16 +30,16 @@ def fir_opt_retime_adapt(din, dtarget, *, init_coeffs=(1.0, ), lr=0.01):
         | qround(fract=din.dtype.fract) \
         | saturate(t=din.dtype) \
         | dreg(init=0)
-    coeffs = adfe_ff_adapt_coeffs(din, lr_err, init_coeffs=init_coeffs, extra_latency=3)
+    coeffs = adfe_ff_adapt_coeffs(din, lr_err, init_coeffs=init_coeffs, extra_latency=4)
     
     dpred |= fir_opt_retime(din, coeffs) | decouple_reg(init=0, num=1) 
-    return ccat(dquant, err)
+    return ccat(dquant | dreg(init=0), err | dreg(init=0))  
     
-    
+"""    
 @gear
 def adfe_opt_v1(din, dtarget, *, init_ff_coeffs=(1.0, ), init_fb_coeffs=(1.0, ), lr=0.01):
     din = din | dreg(init=0)
-    dtarget = dtarget | dreg(init=0) | dreg(init=0)
+    dtarget = dtarget | dreg(init=0) | dreg(init=0) | dreg(init=0)
     
     dpred  = Intf(din.dtype)
     dquant = qam16_quantizer(dpred)[0]
@@ -93,12 +66,13 @@ def adfe_opt_v1(din, dtarget, *, init_ff_coeffs=(1.0, ), init_fb_coeffs=(1.0, ),
     dpred |= (ff + fb) | saturate(t=din.dtype) | decouple_reg(init=0, num=1) 
     
     return ccat(dquant, err)
+"""
     
     
 @gear
 def adfe_opt_top(din, dtarget, *, init_ff_coeffs=(1.0, ), init_fb_coeffs=(1.0, ), lr=0.01):
     din = din | dreg(init=0)
-    dtarget = dtarget | dreg(init=0) | dreg(init=0)
+    dtarget = dtarget | dreg(init=0) | dreg(init=0) | dreg(init=0)
     
     dpred, dquant = Intf(din.dtype), Intf(din.dtype)
     ctrl = (dtarget == const(val=0.0, tout=din.dtype)) # control for training/tracking
@@ -112,7 +86,7 @@ def adfe_opt_top(din, dtarget, *, init_ff_coeffs=(1.0, ), init_fb_coeffs=(1.0, )
         | dreg(init=0)
         
     ff_coeffs = adfe_ff_adapt_coeffs(din, lr_err, 
-                                     init_coeffs=init_ff_coeffs, extra_latency=3)
+                                     init_coeffs=init_ff_coeffs, extra_latency=4)
     fb_luts   = adfe_fb_adapt_luts(din, lr_err, level=2,
                                    init_coeffs=init_fb_coeffs, extra_latency=3)
     ff = fir_opt_retime(din, ff_coeffs)
@@ -120,13 +94,13 @@ def adfe_opt_top(din, dtarget, *, init_ff_coeffs=(1.0, ), init_fb_coeffs=(1.0, )
     dquant |= dqaunt_back
     dpred  |= dpred_back
     
-    return ccat(dquant, err)
+    return ccat(dquant | dreg(init=0) , err | dreg(init=0))
 
 
 def fir_opt_retime_test():
     # generate test sequence
-    test_len = 1000
-    xs  = [(np.random.randint(4) * 2 - 3) for _ in range(test_len)]
+    test_len = 5
+    xs  = [(np.random.randint(2) * 2 - 1) for _ in range(test_len)]
     b   = [1.0, 0.5, 0.25]
     
     # set architecture parameters
@@ -143,10 +117,10 @@ def fir_opt_retime_test():
     
     fir_opt_retime(x_drv, b_drv) \
     | collect(result=res)
-    sim(resdir='../sim/', timeout=10, seed=1234)
+    sim(resdir='../sim/')
     
-    #for x, r in zip(xs, res):
-    #	print(x, float(r))
+    for x, r in zip(xs, res):
+    	print(x, float(r))
     #hdlgen(top='/fir_transpose', lang='v', outdir='../HDL', copy_files=True)
     return
 
@@ -200,7 +174,7 @@ def adfe_test():
     xs_tx = []
     xs_rx = []
     
-    for i in range(3000):
+    for i in range(2000):
         x_tx = np.random.randint(4) * 2.0 - 3.0
         x_rx = awgnChan(raylChan(x_tx))
         xs_tx.append(x_tx)
@@ -235,10 +209,36 @@ def adfe_test():
     plt.plot(np.arange(len(es)), es)
     plt.show()
     return
-
+    
+    
+def adfe_hdlgen():
+    # set architecture parameters
+    wl_fixp  = 16
+    wl_int   = 5
+    wl_fract = wl_fixp - wl_int
+    ff_tap   = 12
+    fb_tap   = 8
+    
+    init_ff_coeffs = tuple([1.0] + [0.0] * (ff_tap-1))
+    init_fb_coeffs = tuple([0.0] * fb_tap)
+    
+    dtype    = Fixp[wl_int, wl_fixp]
+    
+    din = Intf(dtype)
+    dtarget = Intf(dtype)
+    adfe_opt_top(din=din, dtarget=dtarget, 
+                 init_ff_coeffs=init_ff_coeffs, init_fb_coeffs=init_fb_coeffs, lr=0.003)
+    hdlgen(top='/adfe_opt_top', lang='sv', outdir='../HDL/adfe_opt_top', copy_files=True)
+    
+    """
+        CK = 2.0 ns, power = 2.95 mW, area = 11026.996317 um^2, EDP = 5.90
+        CK = 1.5 ns, power = 3.82 mW, area = 11392.744275 um^2, EDP = 5.73
+        
+    """
     
 if __name__ == '__main__':
-    fir_opt_retime_test()
+    #fir_opt_retime_test()
     #fir_opt_retime_adapt_test()
-    #adfe_test()
+    adfe_test()
+    #adfe_hdlgen()
 
