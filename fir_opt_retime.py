@@ -1,7 +1,8 @@
 from pygears.hdl import hdlgen
 from pygears.typing import Uint, Fixp, Tuple
-from pygears.lib import dreg, qround, saturate, decouple, pipeline, const
+from pygears.lib import qround, saturate, decouple, pipeline, const #, dreg, 
 from pygears import gear, Intf
+from adfe_util import decouple_reg as dreg
 
 """
 @gear

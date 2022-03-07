@@ -1,7 +1,7 @@
 import os
 import numpy as np
 from pygears import gear, Intf, sim, reg
-from pygears.lib import dreg, decouple, const, ccat
+from pygears.lib import decouple, const, ccat #, dreg, 
 from pygears.lib import flatten, priority_mux, replicate, once, union_collapse
 from pygears.lib import drv, collect
 from pygears.typing import Int, Uint, Fixp, Tuple, Array, ceil_pow2, saturate, code
@@ -82,7 +82,7 @@ async def psk_quantizer(din: Fixp) -> Tuple[Int[2], Uint[1]]:
             
             
 @gear
-async def qam16_quantizer(din: Fixp) -> Tuple[b'din', Uint[1], Uint[1]]:
+async def pam4_quantizer(din: Fixp) -> Tuple[b'din', Uint[1], Uint[1]]:
     dtype = Tuple[din.dtype, Uint[1], Uint[1]] # quant point, sign, index
     async with din as d:
         if d >= 2:

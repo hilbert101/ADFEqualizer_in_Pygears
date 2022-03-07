@@ -1,19 +1,20 @@
 import os
 import numpy as np
 from pygears import gear, Intf, sim, reg
-from pygears.lib import dreg, decouple, const, ccat, qround, saturate
+from pygears.lib import decouple, const, ccat, qround, saturate #, dreg
 from pygears.lib import flatten, priority_mux, replicate, once, union_collapse
 from pygears.lib import drv, collect
 from pygears.typing import Int, Uint, Fixp, Tuple, Array, ceil_pow2
 from pygears.hdl import hdlgen
-from adfe_util import decouple_reg, mux_comb, ctrl_add2, ctrl_add3, ctrl2_add3, qam16_quantizer
+from adfe_util import decouple_reg as dreg
+from adfe_util import decouple_reg, mux_comb, ctrl_add2, ctrl_add3, ctrl2_add3, pam4_quantizer
         
        
 @gear
 def adfe_fb_inner(din, b):
     comb_next = Intf(din.dtype)
     comb_prev = decouple_reg(comb_next, init=0, num=1)
-    qaunt = qam16_quantizer(comb_prev)
+    qaunt = pam4_quantizer(comb_prev)
     dout, sgn, idx = qaunt[0], qaunt[1], qaunt[2]
     
     temp = const(val=0.0, tout=din.dtype)
@@ -34,11 +35,11 @@ def adfe_fb_inner(din, b):
     """
     
     
- 
+"""
 @gear
 def adfe_fb_stag(din, b):
     dpred = Intf(din.dtype)
-    dqaunt, sgn, idx = qam16_quantizer(dpred)
+    dqaunt, sgn, idx = pam4_quantizer(dpred)
     
     # for the first stage, result combined with the input
     temp  = Intf(din.dtype)
@@ -76,10 +77,50 @@ def adfe_fb_stag(din, b):
         #maximum synthesizable rate: 
         #    16-bit: 
         #    8-tap: CK = 1.18 ns
+"""    
+
+
+def adfe_fb_stag(din, b):
+    dpred = Intf(din.dtype)
+    dqaunt, sgn, idx = pam4_quantizer(dpred)
     
+    # for the first stage, result combined with the input
+    sgn = sgn | decouple_reg(init=0, num=1)
+    idx = idx | decouple_reg(init=0, num=1)
+    coeff = mux_comb(idx, b[0])
+    
+    temp  = Intf(din.dtype)
+    dpred |= ctrl_add3(sgn, temp, din, coeff)    
+    
+    # iterate thru all the rest coeffecients
+    stack = [] 
+    for lut in b[1:]:
+        if len(stack) == 0:
+            stack.append(lut) # do nothing
+        else:
+            # define current stage
+            sgn_prev  = sgn | dreg(init=0)
+            idx_prev  = idx | dreg(init=0)
+            temp_prev = Intf(din.dtype)
+            coeff_prev = mux_comb(idx_prev, lut)
+            coeff      = mux_comb(idx, stack.pop())
+            
+            temp |= ctrl2_add3(sgn_prev, sgn, temp_prev, coeff_prev, coeff)
+            
+            # pass to following stage
+            sgn, idx, temp = sgn_prev, idx_prev, temp_prev
+    
+    # for the final stage
+    if len(stack) == 0:
+        temp |= const(val=0.0, tout=din.dtype)
+    else:
+        coeff = mux_comb(idx, stack.pop())
+        temp |= ctrl_add2(sgn, const(val=0.0, tout=din.dtype), coeff)
+    
+    return ccat(dqaunt, dpred)
 
 
-
+"""
 @gear
 def adfe_fb_stag_v1(din, b):
     temp_prev = Intf(din.dtype)
@@ -102,6 +143,7 @@ def adfe_fb_stag_v1(din, b):
     temp_prev |= const(val=0.0, tout=din.dtype)
     #print(temp_prev)
     return add_s | qround(fract=din.dtype.fract) | saturate(t=din.dtype)
+"""
 
    
 @gear

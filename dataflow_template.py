@@ -1,15 +1,16 @@
 import os
 import numpy as np
 from pygears import gear, Intf
-from pygears.lib import dreg, qround, saturate, trunc, decouple
+from pygears.lib import qround, saturate, trunc, decouple  #, dreg, 
 from pygears.lib import flatten, priority_mux, replicate, once, union_collapse
 from pygears.lib import const, fix, mux, ccat, when
 from pygears.typing import Uint, Fixp, Tuple, Array, ceil_pow2
-from adfe_util import qam16_quantizer
+from adfe_util import pam4_quantizer
+from adfe_util import decouple_reg as dreg
 
 
 @gear
-def fir_direct(din, b, *, fract=0):
+def fir_direct(din, b):
     """
         Direct DIR filter. Its order is determined by the length of b. 
         Adapted from PyGears' tutorial slides.
@@ -18,8 +19,10 @@ def fir_direct(din, b, *, fract=0):
     add_s = temp * b[0]
     for coef in b[1:]:
         temp = temp | dreg(init=0)
-        add_s = add_s + (temp * coef)
-    return add_s | qround(fract=fract) | saturate(t=din.dtype)
+        add_s = (add_s + (temp * coef)) \
+            | qround(fract=din.dtype.fract) \
+            | saturate(t=din.dtype)
+    return add_s 
     
 
 @gear
@@ -102,7 +105,7 @@ def fir_adaptive(din, lr_e, *, init_coeffs=(1.0,)):
 
 
 @gear
-def fir_adaptive_top(din, dtarget, *, init_coeffs=(1.0,), lr=1.0, quantizer=qam16_quantizer):
+def fir_adaptive_top(din, dtarget, *, init_coeffs=(1.0,), lr=1.0, quantizer=pam4_quantizer):
     """
         Top module of adaptive FIR.
         The tap number is determined by the length of init_coeffs
@@ -126,7 +129,7 @@ def fir_adaptive_top(din, dtarget, *, init_coeffs=(1.0,), lr=1.0, quantizer=qam1
     
 @gear
 def dfe_adaptive_top(din, dtarget, *, init_ff_coeffs=(1.0,), init_fb_coeffs=(0.0,),
-                                      lr=1.0, quantizer=qam16_quantizer):
+                                      lr=1.0, quantizer=pam4_quantizer):
     # create variable
     lr_e = Intf(din.dtype)
     dout = Intf(din.dtype)
@@ -154,7 +157,14 @@ def dfe_adaptive_top(din, dtarget, *, init_ff_coeffs=(1.0,), init_fb_coeffs=(0.0
         | qround(fract=din.dtype.fract) | saturate(t=din.dtype) # connect back
     
     return ccat(dout, err)
-    
+
+
+@gear
+def dfe_adaptive_wrap(din, dtarget, *, init_ff_coeffs=(1.0,), init_fb_coeffs=(0.0,),
+                                      lr=1.0, quantizer=pam4_quantizer):
+    return dfe_adaptive_top(din=din | dreg(init=0.0), dtarget=dtarget  | dreg(init=0.0), \
+                     init_ff_coeffs=init_ff_coeffs, init_fb_coeffs=init_fb_coeffs, \
+                     lr=lr, quantizer=quantizer) | dreg
 
 if __name__ == '__main__':
     print()

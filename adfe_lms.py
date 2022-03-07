@@ -1,12 +1,14 @@
 import os
 import numpy as np
 from pygears import gear, Intf, sim, reg
-from pygears.lib import dreg, decouple, const, ccat, qround, saturate
+from pygears.lib import decouple, const, ccat, qround, saturate #, dreg 
 from pygears.lib import flatten, priority_mux, replicate, once, union_collapse
 from pygears.lib import drv, collect
 from pygears.typing import Int, Uint, Fixp, Tuple, Array, ceil_pow2, trunc, code
 from pygears.hdl import hdlgen
+from adfe_util import decouple_reg as dreg
 from adfe_util import decouple_reg, mux_comb
+
 
 
 @gear
@@ -119,10 +121,11 @@ def adfe_fb_adapt_luts(din, lr_err, *, level=2, init_coeffs=(1.0, ), extra_laten
     luts = []
     for i, init_coeff in enumerate(init_coeffs):
         lut = []
+        lr_err_temp = (lr_err * temp) | dreg(init=0) # shared mult
         for j in range(level):
             lut_item = Intf(din.dtype)
-            pre_amp  = const(val=(j*2 + 1), tout=din.dtype)
-            update   = (pre_amp * lr_err * temp) | dreg(init=init_coeff*(j*2 + 1))
+            pre_amp  = const(val=(j*2 + 1), tout=din.dtype) # pre-amplify for LUT
+            update   = (pre_amp * lr_err_temp) | dreg(init=init_coeff*(j*2 + 1))
             lut_next = (lut_item + update) \
                 | qround(fract=din.dtype.fract) | saturate(t=din.dtype)
             lut_item |= lut_next | decouple_reg(init=init_coeff, num=1)
