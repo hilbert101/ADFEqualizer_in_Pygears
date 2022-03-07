@@ -163,8 +163,8 @@ def adfe_hdlgen():
 if __name__ == '__main__':
     # os.chdir(os.path.dirname(os.path.abspath(__file__)))
     # print(os.getcwd())
-    fir_direct_testbench()
-    # fir_adaptive_testbench()
+    # fir_direct_testbench()
+    fir_adaptive_testbench()
     # dfe_adaptive_testbench()
     # adfe_hdlgen()
     

@@ -1,7 +1,7 @@
 import os
 import numpy as np
 from pygears import gear, Intf, sim, reg
-from pygears.lib import decouple, const, ccat #, dreg, 
+from pygears.lib import decouple, const, ccat, dreg
 from pygears.lib import flatten, priority_mux, replicate, once, union_collapse
 from pygears.lib import drv, collect
 from pygears.typing import Int, Uint, Fixp, Tuple, Array, ceil_pow2, saturate, code

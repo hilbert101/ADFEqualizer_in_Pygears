@@ -2,7 +2,7 @@ import os
 import numpy as np
 from matplotlib import pyplot as plt
 from pygears import gear, Intf, sim, reg
-from pygears.lib import decouple, const, ccat, qround, saturate #, dreg
+from pygears.lib import decouple, const, ccat, qround, saturate, dreg
 from pygears.lib import flatten, priority_mux, replicate, once, union_collapse
 from pygears.lib import drv, collect
 from pygears.typing import Int, Uint, Fixp, Tuple, Array, ceil_pow2
@@ -10,7 +10,7 @@ from pygears.hdl import hdlgen
 from fir_opt_retime import fir_opt_retime
 from adfe_fb import adfe_fb_stag #, adfe_fb_stag_v1
 from adfe_lms import adfe_ff_adapt_coeffs, adfe_fb_adapt_luts
-from adfe_util import decouple_reg as dreg
+#from adfe_util import decouple_reg as dreg
 from adfe_util import pam4_quantizer, decouple_reg, mux_comb
 from testbench_template import fir_adaptive_testbench
 from channel import RayleighChannel, AWGNChannel
@@ -35,39 +35,6 @@ def fir_opt_retime_adapt(din, dtarget, *, init_coeffs=(1.0, ), lr=0.01):
     
     dpred |= fir_opt_retime(din, coeffs) | decouple_reg(init=0, num=1) 
     return ccat(dquant | dreg(init=0), err | dreg(init=0))  
-    
-"""    
-@gear
-def adfe_opt_v1(din, dtarget, *, init_ff_coeffs=(1.0, ), init_fb_coeffs=(1.0, ), lr=0.01):
-    din = din | dreg(init=0)
-    dtarget = dtarget | dreg(init=0) | dreg(init=0) | dreg(init=0)
-    
-    dpred  = Intf(din.dtype)
-    dquant = qam16_quantizer(dpred)[0]
-    ctrl   = (dtarget == const(val=0.0, tout=din.dtype)) # control for training/tracking
-    dsel   = mux_comb(ctrl, ccat(dtarget, dquant))  # self-made gears
-    
-    err    = (dsel - dpred) | dreg(init=0)
-    
-    lr_err = const(val=lr, tout=din.dtype) * err \
-        | qround(fract=din.dtype.fract) \
-        | saturate(t=din.dtype) \
-        | dreg(init=0)
-        
-    ff_coeffs = adfe_ff_adapt_coeffs(din, lr_err, 
-                                     init_coeffs=init_ff_coeffs, extra_latency=3)
-    #fb_luts   = adfe_fb_adapt_luts(din, lr_err, level=2,
-    #                               init_coeffs=init_fb_coeffs, extra_latency=3)
-    fb_coeffs = adfe_ff_adapt_coeffs(din, lr_err, 
-                                     init_coeffs=init_fb_coeffs, extra_latency=3)
-                                     
-    print(fb_coeffs.dtype)
-    ff = fir_opt_retime(din, ff_coeffs)
-    fb = adfe_fb_stag_v1(dquant, fb_coeffs)
-    dpred |= (ff + fb) | saturate(t=din.dtype) | decouple_reg(init=0, num=1) 
-    
-    return ccat(dquant, err)
-"""
     
     
 @gear
@@ -175,8 +142,8 @@ def adfe_test():
     xs_tx = []
     xs_rx = []
     
-    len_train = 1
-    len_track = 0
+    len_train = 500
+    len_track = 1500
     len_total = len_train + len_track
     
     for i in range(len_total):

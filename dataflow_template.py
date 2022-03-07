@@ -1,12 +1,12 @@
 import os
 import numpy as np
 from pygears import gear, Intf
-from pygears.lib import qround, saturate, trunc, decouple  #, dreg, 
+from pygears.lib import qround, saturate, trunc, decouple, dreg
 from pygears.lib import flatten, priority_mux, replicate, once, union_collapse
 from pygears.lib import const, fix, mux, ccat, when
 from pygears.typing import Uint, Fixp, Tuple, Array, ceil_pow2
 from adfe_util import pam4_quantizer
-from adfe_util import decouple_reg as dreg
+#from adfe_util import decouple_reg as dreg
 
 
 @gear
